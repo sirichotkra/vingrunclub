@@ -12,5 +12,5 @@
    ───────────────────────────────────────────────────────────── */
 
 window.VING_CONFIG = {
-  apiUrl: "<https://script.google.com/macros/s/AKfycbx.........../exec>"
+    apiUrl: "https://script.google.com/macros/s/AKfycbx9ZaXjxh9TsN5bQudfayW2gUXTpFn5Jej-s0zigst3ibtWbzBXs6N-xmm3_Lf1F81V/exec"
 };
