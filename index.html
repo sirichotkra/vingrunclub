@@ -109,8 +109,12 @@
   .btn{display:inline-flex; align-items:center; justify-content:center; gap:8px; font-family:var(--font-display);
     font-size:15px; text-transform:uppercase; border:none; border-radius:3px; padding:14px 18px;
     cursor:pointer; width:100%; transition:transform .06s ease, opacity .15s ease;}
-  .btn:active{transform:translateY(1px);}
+  .btn:active{transform:translateY(1px); opacity:.82;}
   .btn:disabled{opacity:.5; cursor:default;}
+  /* touch-action:manipulation ตัดการรอ "แตะสองครั้งเพื่อซูม" ของมือถือทิ้ง
+     ปุ่มจึงตอบสนองทันทีที่นิ้วแตะ ไม่หน่วงประมาณ 0.3 วินาทีเหมือนเดิม */
+  .btn, button, [data-nav], a, input, select, textarea, label{touch-action:manipulation;}
+  .bn-btn:active, .icon-btn:active, .link-btn:active{opacity:.55;}
   .btn-yellow{background:var(--ving-yellow); color:var(--on-yellow);}
   .btn-ink{background:var(--fg); color:var(--bg);}
   .btn-outline{background:transparent; border:1.5px solid var(--hairline); color:var(--fg);}
@@ -343,7 +347,9 @@
   }
 
   .poster-wrap{background:var(--card); border:1px solid var(--hairline); padding:10px;}
-  .poster-wrap canvas{display:block; width:100%; height:auto;}
+  .poster-wrap canvas, .poster-wrap img{display:block; width:100%; height:auto;}
+  /* ให้กดค้างแล้วมือถือเสนอ "บันทึกรูปภาพ" ได้ (ค่าเริ่มต้นบางที่บล็อกเมนูนี้ไว้) */
+  .poster-wrap img{-webkit-touch-callout:default; -webkit-user-select:auto; user-select:auto;}
   @media print{ .no-print{display:none !important;} .poster-wrap{border:none; padding:0;} }
 
   .avatar{
@@ -1222,24 +1228,44 @@
     var ev = (ST && ST.events || []).filter(function (e) { return e.code === V.poster; })[0];
     if (!ev) { V.poster = null; render(); return; }
 
+    var fileName = "VING-QR-" + String(ev.code) + ".png";
+
     app.innerHTML =
       '<div class="topbar no-print"><button class="icon-btn" data-poster-close="1" aria-label="ปิด">' + ICON_BACK + "</button>" +
       '<span class="wordmark" style="font-size:15px;">ป้ายสำหรับพิมพ์</span><span style="width:30px;"></span></div>' +
       '<div class="content">' +
-      '<div class="poster-wrap"><canvas id="poster-cv"></canvas></div>' +
-      '<div class="card no-print"><div class="label">วิธีเอาไปพิมพ์</div>' +
-      '<p class="small" style="margin-top:10px; line-height:1.85;">' +
-      '<b>มือถือ:</b> กดค้างที่รูปด้านบน → บันทึกรูปภาพ → สั่งพิมพ์จากคลังรูป<br>' +
-      '<b>คอมพิวเตอร์:</b> คลิกขวาที่รูป → บันทึกรูปเป็น… → สั่งพิมพ์</p>' +
+      '<div class="poster-wrap"><img id="poster-img" alt="ป้าย QR ' + esc(ev.name) + '" ' +
+      'style="width:100%; display:block;"></div>' +
+      '<div class="card no-print"><div class="label">เอาไปพิมพ์</div>' +
+      '<div class="row-gap" style="margin-top:12px;">' +
+      '<a class="btn btn-yellow btn-sm" id="poster-dl" download="' + esc(fileName) + '" href="#">บันทึกรูป</a>' +
+      '<button class="btn btn-outline btn-sm" id="poster-print">สั่งพิมพ์</button></div>' +
+      '<p class="small" style="margin-top:14px; line-height:1.85;">' +
+      '<b>มือถือ:</b> กดค้างที่รูปด้านบน → <b>บันทึกรูปภาพ</b> → สั่งพิมพ์จากคลังรูป<br>' +
+      '<b>คอมพิวเตอร์:</b> กดปุ่ม <b>บันทึกรูป</b> หรือคลิกขวาที่รูป → บันทึกรูปเป็น…</p>' +
       '<p class="muted small" style="margin-top:10px; line-height:1.7;">ขนาดรูปเป็นสัดส่วน A4 พิมพ์เต็มหน้าได้พอดี</p>' +
       "</div></div>";
 
-    var cv = document.getElementById("poster-cv");
-    if (document.fonts && document.fonts.ready) {
-      document.fonts.ready.then(function () { drawPoster(cv, ev, ST.clubName); });
-    } else {
+    var im = document.getElementById("poster-img");
+    var dl = document.getElementById("poster-dl");
+
+    /* วาดลงผ้าใบที่ไม่ได้แสดงผล แล้วแปลงเป็นรูปภาพจริง
+       เพราะ <canvas> กดค้างบนมือถือจะไม่มีเมนู "บันทึกรูปภาพ" ให้ — ต้องเป็น <img> เท่านั้น */
+    function build() {
+      var cv = document.createElement("canvas");
       drawPoster(cv, ev, ST.clubName);
+      var url;
+      try { url = cv.toDataURL("image/png"); }
+      catch (e) { toast("สร้างรูปไม่สำเร็จ ลองใหม่อีกครั้ง"); return; }
+      im.src = url;
+      dl.href = url;
     }
+
+    // รอฟอนต์แบรนด์โหลดเสร็จก่อน ไม่งั้นตัวหนังสือบนป้ายจะเพี้ยน
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(build);
+    else build();
+
+    document.getElementById("poster-print").addEventListener("click", function () { window.print(); });
     app.querySelector("[data-poster-close]").addEventListener("click", function () {
       V.poster = null; render();
     });
@@ -2279,7 +2305,9 @@
     var to = t.getAttribute("data-nav");
     if (to === "home") {
       V.screen = "home"; V.present = null; BOOT.eventCode = "";
-      refresh();
+      // วาดจากข้อมูลที่มีอยู่แล้วทันที ไม่ต้องรอเซิร์ฟเวอร์
+      // แล้วค่อยไปถามข้อมูลใหม่เงียบๆ ข้างหลัง (Apps Script ตอบช้า 1-3 วิ)
+      if (S) { render(); quietRefresh(); } else { refresh(); }
     } else if (to === "scan") {
       V.screen = "scan"; V.present = null; BOOT.eventCode = "";
       render();
@@ -2289,14 +2317,57 @@
     } else if (to === "staff") {
       V.screen = "staff";
       if (staffPin) {
-        // โหลดใหม่ทุกครั้งที่กลับเข้าหน้าทีมงาน — ไม่งั้นจะเห็นรายการค้างของเก่า
-        // (เช่น เพิ่งมีคนเช็คอินครบ แต่รายการรอแจกยังไม่ขึ้น)
-        if (!ST) showLoading();
-        call("apiStaffState", [staffPin]).then(function (s) { ST = s; render(); })
-          .catch(function () { setPin(""); ST = null; render(); });
+        // มีข้อมูลเก่าอยู่ก็โชว์ก่อนเลย แล้วค่อยอัปเดตข้างหลัง
+        // (ยังต้องโหลดใหม่เสมอ ไม่งั้นจะเห็นรายการรอแจกค้างของเก่า)
+        if (ST) render(); else showLoading();
+        quietStaff(true);
       } else { ST = null; render(); }
     }
   });
+
+  /* ===== อัปเดตข้อมูลเงียบๆ ข้างหลัง =====
+     ผู้ใช้เห็นหน้าจอทันที ไม่ต้องนั่งรอ แล้วตัวเลขจะขยับเองเมื่อข้อมูลใหม่มาถึง
+     ใช้ตัวนับลำดับกันไม่ให้คำตอบเก่าที่มาช้า ไปวาดทับหน้าที่ผู้ใช้กดเปลี่ยนไปแล้ว */
+  var navSeq = 0;
+
+  function sameData(a, b) {
+    try { return JSON.stringify(a) === JSON.stringify(b); } catch (e) { return false; }
+  }
+  function busyNow() {
+    // อย่าวาดทับตอนมีป๊อปอัปเปิดอยู่ หรือผู้ใช้กำลังพิมพ์อยู่
+    if (document.querySelector(".modal-bg")) return true;
+    var a = document.activeElement;
+    return !!(a && (a.tagName === "INPUT" || a.tagName === "TEXTAREA" || a.tagName === "SELECT"));
+  }
+
+  function quietRefresh() {
+    var seq = ++navSeq;
+    call("apiRunnerState", [myId(), BOOT.eventCode]).then(function (s) {
+      if (seq !== navSeq) return;               // ผู้ใช้กดไปหน้าอื่นแล้ว ทิ้งคำตอบนี้
+      if (sameData(s, S)) { S = s; return; }    // ไม่มีอะไรเปลี่ยน ไม่ต้องวาดใหม่ให้กระพริบ
+      S = s;
+      if (!busyNow()) render();
+    }).catch(function () { /* เน็ตสะดุด — ยังใช้ข้อมูลเดิมต่อได้ */ });
+  }
+
+  function quietStaff(force) {
+    var seq = ++navSeq;
+    call("apiStaffState", [staffPin]).then(function (s) {
+      if (seq !== navSeq) return;
+      if (!force && sameData(s, ST)) { ST = s; return; }
+      var changed = !sameData(s, ST);
+      ST = s;
+      if (changed && !busyNow()) render();
+    }).catch(function (err) {
+      if (seq !== navSeq) return;
+      // ออกจากโหมดทีมงานเฉพาะตอนรหัสผิดจริงๆ — เน็ตสะดุดไม่ควรเด้งออก
+      if (String(err && err.message || "").indexOf("รหัสผ่าน") >= 0) {
+        setPin(""); ST = null; render();
+      } else if (!ST) {
+        toast("โหลดข้อมูลไม่สำเร็จ ลองใหม่อีกครั้ง");
+      }
+    });
+  }
 
   async function refresh() {
     try {
