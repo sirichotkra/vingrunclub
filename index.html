@@ -996,7 +996,17 @@
       ICON_SCAN + "<span>เช็คอิน</span></button></div>";
   }
 
+  /* งานที่ต้องเก็บกวาดเมื่อเปลี่ยนหน้า (เช่น ปิดกล้องที่เปิดค้างไว้)
+     render() จะล้างหน้าจอทิ้งทุกครั้ง จึงต้องสั่งปิดของเดิมก่อนวาดใหม่ */
+  var leaveHooks = [];
+  function onLeave(fn) { leaveHooks.push(fn); }
+  function runLeaveHooks() {
+    var hs = leaveHooks; leaveHooks = [];
+    hs.forEach(function (f) { try { f(); } catch (e) {} });
+  }
+
   function render() {
+    runLeaveHooks();
     if (V.poster) return renderPoster();
     if (V.present) return renderPresent();
     if (V.screen === "staff") return renderStaff();
@@ -1361,67 +1371,153 @@
     setupCamera(document.getElementById("cam-slot"));
   }
 
+  /** ดึงรหัสกิจกรรมออกจากสิ่งที่อ่านได้จาก QR
+      รองรับทั้งลิงก์แบบใหม่ (?e=) ลิงก์เก่า (?event=) และป้ายที่เก็บรหัสล้วน */
+  function eventCodeFromQr(raw) {
+    var s = String(raw == null ? "" : raw).trim();
+    var m = s.match(/[?&](?:e|event)=([A-Za-z0-9]+)/i);
+    if (m) return m[1].toUpperCase();
+    if (/^[A-Za-z0-9]{4,10}$/.test(s)) return s.toUpperCase();
+    return "";
+  }
+
+  /* โหลดตัวถอดรหัส QR สำรอง (jsQR) เฉพาะตอนที่เครื่องไม่มี BarcodeDetector
+     — iPhone/Safari และ Chrome บนคอมไม่มีตัวนี้ ต้องพึ่งตัวสำรอง
+     ล็อกไฟล์ด้วย integrity กันไฟล์ถูกสลับกลางทาง                        */
+  var JSQR_URL = "https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js";
+  var JSQR_SRI = "sha384-b5Ya4Bq3qCyz39m2ISh+4DxjAIljdeFwK/BsXLuj9gugaNwAcj/ia15fxNZL9Nlx";
+  var jsqrPromise = null;
+
+  function loadJsQr() {
+    if (window.jsQR) return Promise.resolve(window.jsQR);
+    if (jsqrPromise) return jsqrPromise;
+    jsqrPromise = new Promise(function (resolve, reject) {
+      var s = document.createElement("script");
+      s.src = JSQR_URL;
+      s.integrity = JSQR_SRI;
+      s.crossOrigin = "anonymous";
+      s.onload = function () { window.jsQR ? resolve(window.jsQR) : reject(new Error("no jsQR")); };
+      s.onerror = function () { jsqrPromise = null; reject(new Error("load failed")); };
+      document.head.appendChild(s);
+    });
+    return jsqrPromise;
+  }
+
   /**
-   * กล้องในแอป: Apps Script เสิร์ฟหน้าเว็บใน iframe ที่ไม่ได้เปิดสิทธิ์กล้องไว้
-   * บางเครื่อง/บางเบราว์เซอร์จึงเปิดกล้องไม่ได้เลย โค้ดนี้จะ "ลองก่อน"
-   * ถ้าไม่ได้ค่อยบอกให้ใช้กล้องของมือถือแทน (ซึ่งใช้ได้ 100%)
+   * กล้องในแอป — ใช้ได้จริงตั้งแต่ย้ายมาอยู่บนโดเมนตัวเอง (https)
+   * เครื่องที่มี BarcodeDetector (Chrome บน Android) ใช้ของในตัวเครื่อง เร็วกว่า
+   * เครื่องที่ไม่มี (iPhone/Safari, Chrome บนคอม) จะโหลดตัวถอดรหัสสำรองมาใช้แทน
    */
   function setupCamera(slot) {
-    var canScan = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia) &&
-                  typeof window.BarcodeDetector !== "undefined";
-
-    if (!canScan) {
+    function fallback(title, detail) {
       slot.innerHTML =
         '<div class="cam-fallback">' + ICON_SCAN +
-        "<p>เปิด <b>แอปกล้องของมือถือ</b> ส่องที่ QR บนป้ายได้เลย แล้วจะเด้งเข้าหน้าเช็คอินเอง</p>" +
-        '<p class="muted" style="margin-top:8px;">(กล้องในแอปเปิดไม่ได้บนเครื่องส่วนใหญ่ เป็นข้อจำกัดของ Google Apps Script)</p></div>';
+        "<p>" + title + "</p>" +
+        '<p class="muted" style="margin-top:8px;">' + detail + "</p></div>";
+    }
+
+    if (!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia)) {
+      fallback("เบราว์เซอร์นี้เปิดกล้องในหน้าเว็บไม่ได้ — ใช้ <b>แอปกล้องของมือถือ</b> ส่อง QR บนป้ายแทนได้เลย",
+               "หรือพิมพ์รหัส 6 ตัวในช่องด้านบน");
       return;
     }
 
     slot.innerHTML = '<button class="btn btn-ink" id="cam-start">' + ICON_SCAN + "เปิดกล้องสแกน</button>" +
       '<div id="cam-view" hidden style="margin-top:12px;">' +
-      '<video playsinline muted style="width:100%; border-radius:3px; background:#000;"></video>' +
-      '<button class="btn btn-quiet btn-sm" id="cam-stop" style="margin-top:10px;">ปิดกล้อง</button></div>';
+      '<video playsinline autoplay muted style="width:100%; border-radius:3px; background:#000;"></video>' +
+      '<p class="muted small center" style="margin-top:8px;">เล็ง QR ให้อยู่กลางจอ</p>' +
+      '<button class="btn btn-quiet btn-sm" id="cam-stop" style="margin-top:6px;">ปิดกล้อง</button></div>';
 
     var startBtn = document.getElementById("cam-start");
     var view = document.getElementById("cam-view");
     var video = view.querySelector("video");
-    var stream = null, timer = null, detector = null;
+    var stream = null, timer = null, canvas = null, ctx = null, hit = false;
 
     function stop() {
       if (timer) { clearInterval(timer); timer = null; }
       if (stream) { stream.getTracks().forEach(function (t) { t.stop(); }); stream = null; }
+      try { video.srcObject = null; } catch (e) {}
       view.hidden = true; startBtn.hidden = false;
+    }
+    onLeave(stop);   // ออกจากหน้านี้เมื่อไหร่ ปิดกล้องทันที
+
+    function found(raw) {
+      var code = eventCodeFromQr(raw);
+      if (!code || hit) return;
+      hit = true; stop(); BOOT.eventCode = code; doCheckin();
+    }
+
+    /** อ่านเฟรมปัจจุบันด้วยตัวถอดรหัสสำรอง (ย่อภาพก่อนเพื่อไม่ให้หน่วง) */
+    function scanFrameWithJsQr() {
+      var w = video.videoWidth, h = video.videoHeight;
+      if (!w || !h) return;
+      var scale = Math.min(1, 480 / Math.max(w, h));
+      var cw = Math.round(w * scale), ch = Math.round(h * scale);
+      if (!canvas) { canvas = document.createElement("canvas"); ctx = canvas.getContext("2d", { willReadFrequently: true }); }
+      if (canvas.width !== cw || canvas.height !== ch) { canvas.width = cw; canvas.height = ch; }
+      ctx.drawImage(video, 0, 0, cw, ch);
+      var img = ctx.getImageData(0, 0, cw, ch);
+      var res = window.jsQR(img.data, cw, ch, { inversionAttempts: "dontInvert" });
+      if (res && res.data) found(res.data);
     }
 
     startBtn.addEventListener("click", async function () {
       busy(startBtn, true, "กำลังเปิดกล้อง…");
+      var stopped = false;
+
+      // 1) ขอสิทธิ์กล้องก่อน — ให้ผู้ใช้เห็นป๊อปอัปทันทีที่กด
       try {
-        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
-        video.srcObject = stream;
-        await video.play();
-        detector = new window.BarcodeDetector({ formats: ["qr_code"] });
-        startBtn.hidden = true; view.hidden = false;
-        busy(startBtn, false);
-        timer = setInterval(async function () {
-          try {
-            var found = await detector.detect(video);
-            if (found && found.length) {
-              var raw = String(found[0].rawValue || "");
-              var m = raw.match(/[?&]event=([A-Za-z0-9]+)/);
-              var code = m ? m[1].toUpperCase() : "";
-              if (code) { stop(); BOOT.eventCode = code; doCheckin(); }
-            }
-          } catch (err) { /* เฟรมนี้อ่านไม่ได้ ลองเฟรมถัดไป */ }
-        }, 400);
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: "environment" } }, audio: false
+        });
       } catch (err) {
         busy(startBtn, false);
-        slot.innerHTML =
-          '<div class="cam-fallback">' + ICON_SCAN +
-          "<p>เครื่องนี้เปิดกล้องในแอปไม่ได้ — ใช้ <b>แอปกล้องของมือถือ</b> ส่อง QR บนป้ายแทนได้เลย</p>" +
-          '<p class="muted" style="margin-top:8px;">หรือพิมพ์รหัสในช่องด้านบน</p></div>';
+        var name = (err && err.name) || "";
+        if (name === "NotAllowedError" || name === "SecurityError") {
+          fallback("คุณกดไม่อนุญาตให้ใช้กล้องไว้",
+                   "iPhone: แตะไอคอน <b>ᴀA</b> ซ้ายบนของ Safari → การตั้งค่าเว็บไซต์ → กล้อง → อนุญาต<br>" +
+                   "Android: แตะไอคอน 🔒 ข้างช่อง URL → สิทธิ์ → กล้อง → อนุญาต<br>" +
+                   "หรือใช้แอปกล้องของมือถือส่อง QR แทนก็ได้ครับ");
+        } else if (name === "NotFoundError" || name === "OverconstrainedError") {
+          fallback("ไม่พบกล้องบนเครื่องนี้", "ใช้แอปกล้องของมือถือ หรือพิมพ์รหัส 6 ตัวด้านบน");
+        } else {
+          fallback("เปิดกล้องไม่สำเร็จ", "ใช้แอปกล้องของมือถือส่อง QR บนป้ายแทนได้เลย");
+        }
+        return;
       }
+
+      video.srcObject = stream;
+      try { await video.play(); } catch (e) { /* บางเครื่องเล่นเองอยู่แล้ว */ }
+      startBtn.hidden = true; view.hidden = false;
+      busy(startBtn, false);
+
+      // 2) เลือกตัวถอดรหัส — ของในตัวเครื่องก่อน ไม่มีค่อยโหลดตัวสำรอง
+      if (typeof window.BarcodeDetector !== "undefined") {
+        try {
+          var detector = new window.BarcodeDetector({ formats: ["qr_code"] });
+          timer = setInterval(async function () {
+            try {
+              var r = await detector.detect(video);
+              if (r && r.length) found(r[0].rawValue);
+            } catch (e) { /* เฟรมนี้อ่านไม่ได้ ลองเฟรมถัดไป */ }
+          }, 300);
+          return;
+        } catch (e) { /* สร้างไม่สำเร็จ ตกไปใช้ตัวสำรอง */ }
+      }
+
+      try {
+        await loadJsQr();
+      } catch (e) {
+        stop(); stopped = true;
+        fallback("โหลดตัวอ่าน QR ไม่สำเร็จ (เน็ตอาจไม่เสถียร)",
+                 "ใช้แอปกล้องของมือถือส่อง QR บนป้าย หรือพิมพ์รหัส 6 ตัวด้านบน");
+      }
+      if (stopped || !stream) return;
+      timer = setInterval(function () {
+        try { scanFrameWithJsQr(); } catch (e) { /* ลองเฟรมถัดไป */ }
+      }, 250);
     });
+
     document.getElementById("cam-stop").addEventListener("click", stop);
   }
 
