@@ -1081,7 +1081,21 @@
         setMyId(reg.runnerId);
         if (BOOT.eventCode) { await doCheckin(); return; }
         await refresh();
-      } catch (e) { toast(e.message); busy(btn, false); }
+      } catch (e) {
+        var msg = String(e.message || "");
+        // เบอร์ซ้ำ — พากลับไปขั้นใส่เบอร์ กดถัดไปอีกทีจะเข้าบัญชีเดิมให้เอง
+        if (msg.indexOf("PHONE_TAKEN|") === 0) {
+          toast(msg.slice("PHONE_TAKEN|".length));
+          stage = "phone";
+          nameWrap.hidden = true;
+          busy(btn, false);            // ต้องปลดสถานะก่อน ไม่งั้นข้อความปุ่มเดิมจะทับ
+          btn.dataset.old = "ถัดไป";
+          btn.textContent = "ถัดไป";
+          phoneEl.focus();
+          return;
+        }
+        toast(msg); busy(btn, false);
+      }
     }
 
     btn.addEventListener("click", go);
@@ -1681,15 +1695,19 @@
   function staffEvents(body) {
     var link = document.createElement("div");
     link.className = "card";
+    // ต้องเป็นลิงก์ของหน้าเว็บนี้จริงๆ ไม่ใช่ลิงก์ฝั่งเซิร์ฟเวอร์
+    // เปลี่ยนโดเมนเมื่อไหร่ ตรงนี้กับ QR จะเปลี่ยนตามเองทันที
+    var appUrl = BOOT.webAppUrl || location.origin + "/";
     link.innerHTML = '<div class="label">ลิงก์แอป (ที่ QR ใช้)</div>' +
-      '<p class="small muted" style="margin-top:8px; line-height:1.7;">QR ทุกใบชี้มาที่ลิงก์นี้ ใครก็เปิดได้ ไม่ต้องล็อกอิน</p>' +
+      '<p class="small muted" style="margin-top:8px; line-height:1.7;">QR ทุกใบชี้มาที่ลิงก์นี้ ใครก็เปิดได้ ไม่ต้องล็อกอิน<br>' +
+      'ถ้าย้ายโดเมนใหม่ ลิงก์นี้จะเปลี่ยนตามเอง แต่ <b>ต้องออก QR ใหม่</b> เพราะป้ายเก่ายังชี้ไปที่เดิม</p>' +
       '<div class="mono small wrap-anywhere" style="margin-top:10px; background:var(--surface-2); padding:10px;">' +
-      esc(ST.webAppUrl || "(ยังไม่ได้ Deploy)") + "</div>" +
+      esc(appUrl) + "</div>" +
       '<div class="row-gap" style="margin-top:10px;">' +
       '<button class="btn btn-outline btn-sm" id="copy-app">คัดลอกลิงก์</button>' +
       '<a class="btn btn-outline btn-sm" href="' + esc(ST.sheetUrl) + '" target="_blank" rel="noopener">เปิด Google Sheet</a></div>';
     body.appendChild(link);
-    document.getElementById("copy-app").addEventListener("click", function () { copy(ST.webAppUrl); });
+    document.getElementById("copy-app").addEventListener("click", function () { copy(appUrl); });
 
     var mk = document.createElement("div");
     mk.className = "card";
@@ -1754,7 +1772,8 @@
         '<button class="btn btn-ink btn-sm" data-present="' + esc(ev.code) + '">แสดงเต็มจอ</button>' +
         '<button class="btn btn-yellow btn-sm" data-poster="' + esc(ev.code) + '">ป้ายพิมพ์</button>' +
         '<button class="btn btn-outline btn-sm" data-copy="' + esc(ev.code) + '">คัดลอกลิงก์</button>' +
-        '<button class="btn btn-outline btn-sm" data-toggle="' + esc(ev.id) + '">' + (ev.active ? "ปิดกิจกรรม" : "เปิดใหม่") + "</button></div>";
+        '<button class="btn btn-outline btn-sm" data-toggle="' + esc(ev.id) + '">' + (ev.active ? "ปิดกิจกรรม" : "เปิดใหม่") + "</button>" +
+        '<button class="btn btn-quiet btn-sm" data-delev="' + esc(ev.id) + '" style="color:var(--danger);">ลบกิจกรรม</button></div>';
       body.appendChild(card);
       drawQr(card.querySelector("canvas"), eventUrl(ev.code), 260);
       card.querySelector("[data-present]").addEventListener("click", function () { V.present = ev.code; render(); });
@@ -1764,6 +1783,28 @@
         busy(this, true, "…");
         try { await call("apiSetEventActive", [staffPin, ev.id, !ev.active]); await reloadStaff(); }
         catch (e) { toast(e.message); busy(this, false); }
+      });
+      card.querySelector("[data-delev]").addEventListener("click", async function () {
+        var btnEl = this;
+        var hasCheckins = ev.count > 0;
+        var ok = await confirmBox({
+          label: "ลบกิจกรรม",
+          title: "ลบ “" + ev.name + "” ?",
+          body: "QR ของกิจกรรมนี้จะใช้ไม่ได้อีก และป้ายที่ปริ้นไว้แล้วจะสแกนไม่ติด",
+          warn: hasCheckins
+            ? "มีคนเช็คอินไปแล้ว <b>" + ev.count + " คน</b> — ลบแล้ว<b>แต้มของทุกคนจะหายไปด้วย</b> และกู้คืนไม่ได้<br>" +
+              "ถ้าแค่ไม่อยากให้สแกนได้อีก ให้กด <b>ปิดกิจกรรม</b> แทน แต้มจะยังอยู่ครบ"
+            : "ยังไม่มีใครเช็คอินกิจกรรมนี้ ลบได้เลย ไม่มีแต้มของใครหาย",
+          okText: hasCheckins ? "ลบทั้งแต้ม " + ev.count + " คน" : "ลบกิจกรรม"
+        });
+        if (!ok) return;
+        busy(btnEl, true, "กำลังลบ…");
+        try {
+          var res = await call("apiDeleteEvent", [staffPin, ev.id, ev.count]);
+          toast("ลบ " + res.name + " แล้ว" +
+                (res.removedCheckins ? " (แต้มหายไป " + res.removedCheckins + " ครั้ง)" : ""));
+          await reloadStaff();
+        } catch (e) { toast(e.message); busy(btnEl, false); }
       });
       card.querySelector("[data-limit]").addEventListener("click", async function () {
         var v = card.querySelector(".cap-input").value;
