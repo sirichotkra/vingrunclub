@@ -12,5 +12,5 @@
    ───────────────────────────────────────────────────────────── */
 
 window.VING_CONFIG = {
-  apiUrl: "PASTE_YOUR_APPS_SCRIPT_URL_HERE"
+  apiUrl: "<https://script.google.com/macros/s/AKfycbx.........../exec>"
 };
