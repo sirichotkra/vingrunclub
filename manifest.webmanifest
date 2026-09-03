@@ -1,0 +1,27 @@
+{
+  "name": "VING RUN CLUB",
+  "short_name": "VING RUN",
+  "description": "บัตรสะสมครั้งของ VING RUN CLUB — สแกน QR หลังจบกิจกรรมเพื่อเช็คอิน",
+  "lang": "th",
+  "dir": "ltr",
+  "start_url": ".",
+  "scope": ".",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#FAF9F7",
+  "theme_color": "#231F20",
+  "categories": ["health", "fitness", "lifestyle"],
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    {
+      "name": "เช็คอิน",
+      "short_name": "เช็คอิน",
+      "url": "./?s=scan",
+      "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }]
+    }
+  ]
+}
